@@ -2,6 +2,11 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 import cv2
 import numpy as np
 import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# Suppress TensorFlow warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from tensorflow import keras
 
 # ==================== CONFIG ====================
@@ -17,7 +22,12 @@ print(f"📁 MODELS_FOLDER: {MODELS_FOLDER}")
 print(f"📁 MODELS_FOLDER exists: {os.path.exists(MODELS_FOLDER)}")
 
 if os.path.exists(MODELS_FOLDER):
-    print(f"📁 Files in MODELS_FOLDER: {os.listdir(MODELS_FOLDER)}")
+    files = os.listdir(MODELS_FOLDER)
+    print(f"📁 Files in MODELS_FOLDER: {files}")
+    for f in files:
+        full_path = os.path.join(MODELS_FOLDER, f)
+        size = os.path.getsize(full_path)
+        print(f"   - {f}: {size:,} bytes")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -29,14 +39,33 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 class IronWaterClassifier:
     def __init__(self, object_type, model_path):
         self.object_type = object_type
+        self.model = None
+        self.class_names = []
 
+        # Load model with better error handling
         try:
-            self.model = keras.models.load_model(model_path)
-            print(f"✅ Model loaded: {object_type} from {model_path}")
+            print(f"   Loading model from: {model_path}")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found: {model_path}")
+            
+            # Try loading with keras 3.x format first, then fallback
+            try:
+                self.model = keras.models.load_model(model_path, compile=False)
+                print(f"✅ Model loaded successfully: {object_type}")
+            except Exception as e:
+                print(f"   First attempt failed: {e}")
+                print(f"   Trying alternative load method...")
+                # Fallback: try with safe_mode
+                self.model = keras.models.load_model(model_path, custom_objects=None, safe_mode=False)
+                print(f"✅ Model loaded (alternative method): {object_type}")
+                
         except Exception as e:
-            print(f"❌ Failed to load {object_type}: {e}")
+            print(f"❌ FAILED to load {object_type}: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             self.model = None
 
+        # Set class names
         if object_type == 'orange':
             self.class_names = ['orange_clean', 'orange_iron_contaminated']
         elif object_type == 'banana':
@@ -64,7 +93,7 @@ class IronWaterClassifier:
 
     def classify(self, img):
         if self.model is None:
-            raise ValueError("Model not loaded")
+            raise ValueError(f"Model not loaded for {self.object_type}")
 
         img = self.preprocess(img)
         img = np.expand_dims(img, axis=0)
@@ -87,9 +116,9 @@ class IronWaterClassifier:
 classifiers = {}
 
 def load_models():
-    print("\n" + "="*50)
+    print("\n" + "="*60)
     print("🔄 LOADING MODELS")
-    print("="*50)
+    print("="*60)
     
     model_files = {
         'orange': os.path.join(MODELS_FOLDER, 'orange_classifier.keras'),
@@ -104,19 +133,27 @@ def load_models():
         
         if os.path.exists(path):
             file_size = os.path.getsize(path)
-            print(f"   Size: {file_size} bytes")
+            print(f"   Size: {file_size:,} bytes")
             
-            if file_size < 1000:  # Less than 1KB means corrupted/placeholder
+            if file_size < 1000:
                 print(f"   ⚠️ File seems corrupted (too small)")
                 continue
                 
-            classifiers[obj] = IronWaterClassifier(obj, path)
+            classifier = IronWaterClassifier(obj, path)
+            if classifier.model is not None:
+                classifiers[obj] = classifier
+                print(f"   ✅ {obj} classifier ready")
+            else:
+                print(f"   ❌ {obj} classifier failed to load")
         else:
             print(f"   ❌ Model file not found: {path}")
 
-    print("\n" + "="*50)
-    print(f"✅ Loaded models: {list(classifiers.keys())}")
-    print("="*50 + "\n")
+    print("\n" + "="*60)
+    if classifiers:
+        print(f"✅ Successfully loaded models: {list(classifiers.keys())}")
+    else:
+        print(f"❌ NO MODELS LOADED! Check paths and file integrity.")
+    print("="*60 + "\n")
 
 # ==================== ROUTES ====================
 
@@ -182,9 +219,9 @@ def classify_image():
 # ==================== MAIN ====================
 
 if __name__ == '__main__':
-    print("\n" + "="*50)
+    print("\n" + "="*60)
     print("🚀 STARTING ORION APP")
-    print("="*50)
+    print("="*60)
 
     load_models()
 
