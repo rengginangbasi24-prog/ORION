@@ -4,29 +4,31 @@ function scrollToClassify() {
     document.getElementById('classify').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ==================== IMAGE UPLOAD ====================
+// ==================== IMAGE UPLOAD (MULTIPLE) ====================
 
 const imageInput = document.getElementById('imageInput');
 const uploadBox = document.querySelector('.upload-box');
-const previewImage = document.getElementById('previewImage');
 const modelSelect = document.getElementById('modelSelect');
 
-let uploadedFile = null;
+let uploadedFiles = []; // Array untuk banyak file
 
-// Click to upload
+// Allow multiple file selection
+imageInput.setAttribute('multiple', 'multiple');
+
+// Click to upload multiple files
 uploadBox.addEventListener('click', () => {
     imageInput.click();
 });
 
 // File selected via input
 imageInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-        handleFileUpload(file);
+    const files = e.target.files;
+    if (files.length > 0) {
+        handleMultipleFileUpload(files);
     }
 });
 
-// Drag & drop
+// Drag & drop multiple files
 uploadBox.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadBox.style.borderColor = '#8b2e42';
@@ -43,22 +45,63 @@ uploadBox.addEventListener('drop', (e) => {
     uploadBox.style.borderColor = 'rgba(255,255,255,0.5)';
     uploadBox.style.backgroundColor = 'transparent';
     
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-        handleFileUpload(file);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleMultipleFileUpload(files);
     }
 });
 
-function handleFileUpload(file) {
-    uploadedFile = file;
+function handleMultipleFileUpload(files) {
+    uploadedFiles = []; // Clear previous files
     
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        previewImage.src = e.target.result;
-        previewImage.style.display = 'block';
-        console.log('✅ Image uploaded:', file.name);
-    };
-    reader.readAsDataURL(file);
+    const fileArray = Array.from(files);
+    console.log(`✅ ${fileArray.length} files uploaded`);
+
+    // Display preview gallery
+    displayPreviewGallery(fileArray);
+
+    // Store files
+    fileArray.forEach((file) => {
+        if (file.type.startsWith('image/')) {
+            uploadedFiles.push(file);
+        }
+    });
+
+    console.log(`📸 ${uploadedFiles.length} valid image files ready to classify`);
+}
+
+function displayPreviewGallery(files) {
+    const galleryDiv = document.getElementById('previewGallery') || createPreviewGallery();
+    galleryDiv.innerHTML = '';
+
+    Array.from(files).forEach((file, index) => {
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const item = document.createElement('div');
+                item.className = 'preview-item';
+                item.innerHTML = `
+                    <img src="${e.target.result}" alt="Preview ${index + 1}">
+                    <span class="preview-count">${index + 1}</span>
+                `;
+                galleryDiv.appendChild(item);
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    galleryDiv.style.display = 'grid';
+}
+
+function createPreviewGallery() {
+    const gallery = document.createElement('div');
+    gallery.id = 'previewGallery';
+    gallery.className = 'preview-gallery';
+    
+    const uploadBox = document.querySelector('.upload-box');
+    uploadBox.parentElement.insertBefore(gallery, uploadBox.nextSibling);
+    
+    return gallery;
 }
 
 // ==================== MODEL SELECTION MAPPING ====================
@@ -69,11 +112,11 @@ const modelMapping = {
     'model3': 'orange'
 };
 
-// ==================== IMAGE CLASSIFICATION ====================
+// ==================== BATCH IMAGE CLASSIFICATION ====================
 
 async function classifyImage() {
-    if (!uploadedFile) {
-        alert('❌ Please upload an image first!');
+    if (uploadedFiles.length === 0) {
+        alert('❌ Please upload at least one image!');
         return;
     }
 
@@ -85,10 +128,87 @@ async function classifyImage() {
         return;
     }
 
-    console.log('🔍 Classifying with model:', modelType);
+    console.log(`🔍 Classifying ${uploadedFiles.length} images with model:`, modelType);
 
+    // Show processing UI
+    showProcessing(uploadedFiles.length);
+
+    const results = [];
+    let cleanCount = 0;
+    let contaminatedCount = 0;
+    let totalConfidence = 0;
+    let successCount = 0;
+
+    // Process each file sequentially
+    for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        
+        try {
+            const result = await classifySingleImage(file, modelType, i + 1);
+            
+            if (result.success) {
+                results.push({
+                    fileName: file.name,
+                    condition: result.condition,
+                    confidence: result.confidence,
+                    index: i + 1,
+                    success: true
+                });
+
+                // Update counters
+                if (result.condition.includes('Clean')) {
+                    cleanCount++;
+                } else {
+                    contaminatedCount++;
+                }
+                totalConfidence += result.confidence;
+                successCount++;
+            } else {
+                results.push({
+                    fileName: file.name,
+                    error: result.error,
+                    index: i + 1,
+                    success: false
+                });
+            }
+
+            // Update progress
+            updateProcessingProgress(i + 1, uploadedFiles.length);
+            
+        } catch (error) {
+            console.error(`❌ Error classifying ${file.name}:`, error);
+            results.push({
+                fileName: file.name,
+                error: error.message,
+                index: i + 1,
+                success: false
+            });
+        }
+    }
+
+    // Hide processing UI
+    hideProcessing();
+
+    // Calculate summary
+    const avgConfidence = successCount > 0 ? (totalConfidence / successCount * 100).toFixed(2) : 0;
+    const totalSamples = results.length;
+
+    // Display batch results
+    displayBatchResults({
+        results: results,
+        summary: {
+            totalSamples: totalSamples,
+            cleanCount: cleanCount,
+            contaminatedCount: contaminatedCount,
+            avgConfidence: avgConfidence,
+            modelType: modelType
+        }
+    });
+}
+
+async function classifySingleImage(file, modelType, index) {
     const formData = new FormData();
-    formData.append('image', uploadedFile);
+    formData.append('image', file);
     formData.append('object_type', modelType);
 
     try {
@@ -100,52 +220,250 @@ async function classifyImage() {
         const data = await response.json();
 
         if (data.success) {
-            displayResult(data.result);
+            return {
+                success: true,
+                condition: data.result.condition,
+                confidence: data.result.confidence
+            };
         } else {
-            alert('❌ Error: ' + data.error);
+            return {
+                success: false,
+                error: data.error || 'Unknown error'
+            };
         }
     } catch (error) {
-        console.error('❌ Error:', error);
-        alert('❌ Error classifying image');
+        return {
+            success: false,
+            error: error.message
+        };
     }
 }
 
-function displayResult(result) {
-    const resultClass = document.getElementById('resultClass');
-    const confidenceText = document.getElementById('confidenceText');
-    const confidenceLabel = document.getElementById('confidenceLabel');
-    const confidenceBar = document.getElementById('confidenceBar');
-    const summaryText = document.getElementById('summaryText');
+// ==================== PROCESSING UI ====================
 
-    const condition = result.condition;
-    const confidence = (result.confidence * 100).toFixed(2);
-
-    // Update result display
-    resultClass.textContent = condition.toUpperCase();
-    confidenceText.textContent = confidence + '%';
-    confidenceLabel.textContent = confidence + '%';
-    confidenceBar.style.width = confidence + '%';
-
-    // Update summary
-    const modelName = modelMapping[modelSelect.value];
-    summaryText.innerHTML = `
-        <strong>Model:</strong> ${modelName.charAt(0).toUpperCase() + modelName.slice(1)}<br>
-        <strong>Condition:</strong> ${condition}<br>
-        <strong>Confidence:</strong> ${confidence}%<br>
-        <br>
-        ${condition.includes('Clean') 
-            ? '✅ Water quality is clean and safe!' 
-            : '⚠️ Iron contamination detected in water!'}
+function showProcessing(totalFiles) {
+    const resultCard = document.querySelector('.result-card');
+    resultCard.innerHTML = `
+        <div class="processing-container">
+            <div class="spinner"></div>
+            <h2>Processing Images</h2>
+            <p id="processingText">Analyzing image 0 of ${totalFiles}...</p>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="processingBar" style="width: 0%"></div>
+            </div>
+        </div>
     `;
+}
 
-    // Change color based on result
-    if (condition.includes('Clean')) {
-        resultClass.style.color = '#4ade80';
+function updateProcessingProgress(current, total) {
+    const processingText = document.getElementById('processingText');
+    const processingBar = document.getElementById('processingBar');
+    
+    if (processingText) {
+        processingText.textContent = `Analyzing image ${current} of ${total}...`;
+    }
+    if (processingBar) {
+        const percentage = (current / total) * 100;
+        processingBar.style.width = percentage + '%';
+    }
+}
+
+function hideProcessing() {
+    // Results will be displayed by displayBatchResults()
+}
+
+// ==================== DISPLAY BATCH RESULTS ====================
+
+function displayBatchResults(data) {
+    const resultCard = document.querySelector('.result-card');
+    const { results, summary } = data;
+
+    const cleanPercent = summary.totalSamples > 0 
+        ? ((summary.cleanCount / summary.totalSamples) * 100).toFixed(1) 
+        : 0;
+    const contaminatedPercent = summary.totalSamples > 0 
+        ? ((summary.contaminatedCount / summary.totalSamples) * 100).toFixed(1) 
+        : 0;
+
+    // Determine conclusion
+    let conclusion = '';
+    if (summary.cleanCount === summary.totalSamples) {
+        conclusion = '✅ All samples are clean! Water quality is excellent.';
+    } else if (summary.contaminatedCount === summary.totalSamples) {
+        conclusion = '⚠️ All samples show contamination. Immediate action recommended.';
+    } else if (summary.cleanCount > summary.contaminatedCount) {
+        conclusion = '✅ Mostly clean water detected, but some contamination found. Monitor water quality.';
     } else {
-        resultClass.style.color = '#fca5a5';
+        conclusion = '⚠️ Significant contamination detected. Further investigation recommended.';
     }
 
-    console.log('✅ Result displayed:', result);
+    resultCard.innerHTML = `
+        <div class="batch-results">
+            <div class="batch-summary">
+                <h2>📊 Analysis Summary</h2>
+                
+                <div class="summary-stats">
+                    <div class="stat-box">
+                        <span class="stat-label">Total Samples</span>
+                        <span class="stat-value">${summary.totalSamples}</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">��� Clean</span>
+                        <span class="stat-value clean">${summary.cleanCount} (${cleanPercent}%)</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">⚠️ Contaminated</span>
+                        <span class="stat-value contaminated">${summary.contaminatedCount} (${contaminatedPercent}%)</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">🎯 Avg Confidence</span>
+                        <span class="stat-value">${summary.avgConfidence}%</span>
+                    </div>
+                </div>
+
+                <div class="conclusion-box">
+                    <h3>🔍 Conclusion</h3>
+                    <p>${conclusion}</p>
+                    <div class="model-info">
+                        <strong>Model Used:</strong> ${summary.modelType.charAt(0).toUpperCase() + summary.modelType.slice(1)}
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-gallery">
+                <h3>📸 Individual Results</h3>
+                <div class="gallery-grid">
+                    ${results.map((result, idx) => `
+                        <div class="result-item ${result.success ? (result.condition.includes('Clean') ? 'clean' : 'contaminated') : 'error'}">
+                            <div class="result-number">${result.index}</div>
+                            <div class="result-content">
+                                <div class="file-name">${result.fileName}</div>
+                                ${result.success ? `
+                                    <div class="condition">${result.condition}</div>
+                                    <div class="confidence">${(result.confidence * 100).toFixed(1)}%</div>
+                                ` : `
+                                    <div class="error-text">Error: ${result.error}</div>
+                                `}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn-primary" onclick="downloadReport(${JSON.stringify(data).replace(/"/g, '&quot;')})">
+                    📥 Download Report
+                </button>
+                <button class="btn-secondary" onclick="resetClassifier()">
+                    🔄 Classify New Batch
+                </button>
+            </div>
+        </div>
+    `;
+
+    console.log('✅ Batch results displayed');
+}
+
+// ==================== DOWNLOAD REPORT ====================
+
+function downloadReport(data) {
+    const { results, summary } = data;
+    const timestamp = new Date().toLocaleString();
+
+    let reportText = `
+ORION - BATCH CLASSIFICATION REPORT
+=====================================
+
+Generated: ${timestamp}
+Model Used: ${summary.modelType.toUpperCase()}
+Total Samples: ${summary.totalSamples}
+
+SUMMARY STATISTICS
+==================
+Clean Samples: ${summary.cleanCount}
+Contaminated Samples: ${summary.contaminatedCount}
+Average Confidence: ${summary.avgConfidence}%
+
+DETAILED RESULTS
+================
+`;
+
+    results.forEach((result, idx) => {
+        reportText += `
+${idx + 1}. ${result.fileName}
+   Status: ${result.success ? (result.condition.includes('Clean') ? 'CLEAN ✅' : 'CONTAMINATED ⚠️') : 'ERROR'}
+   ${result.success ? `Confidence: ${(result.confidence * 100).toFixed(2)}%` : `Error: ${result.error}`}
+`;
+    });
+
+    reportText += `
+
+CONCLUSION
+==========
+${getConclusionText(summary)}
+
+=====================================
+End of Report
+`;
+
+    // Download file
+    const element = document.createElement('a');
+    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(reportText));
+    element.setAttribute('download', `orion-report-${Date.now()}.txt`);
+    element.style.display = 'none';
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+
+    console.log('✅ Report downloaded');
+}
+
+function getConclusionText(summary) {
+    if (summary.cleanCount === summary.totalSamples) {
+        return 'All samples are clean! Water quality is excellent.';
+    } else if (summary.contaminatedCount === summary.totalSamples) {
+        return 'All samples show contamination. Immediate action recommended.';
+    } else if (summary.cleanCount > summary.contaminatedCount) {
+        return 'Mostly clean water detected, but some contamination found. Monitor water quality.';
+    } else {
+        return 'Significant contamination detected. Further investigation recommended.';
+    }
+}
+
+// ==================== RESET CLASSIFIER ====================
+
+function resetClassifier() {
+    uploadedFiles = [];
+    const gallery = document.getElementById('previewGallery');
+    if (gallery) gallery.innerHTML = '';
+    
+    const resultCard = document.querySelector('.result-card');
+    resultCard.innerHTML = `
+        <div class="result-top">
+            <div>
+                <p>AI RESULT</p>
+                <h2 id="resultClass">READY</h2>
+            </div>
+            <div class="confidence">
+                <span id="confidenceText">0%</span>
+            </div>
+        </div>
+        <div class="bar-group">
+            <div class="bar-label">
+                <span>Confidence</span>
+                <span id="confidenceLabel">0%</span>
+            </div>
+            <div class="bar">
+                <div class="bar-fill" id="confidenceBar"></div>
+            </div>
+        </div>
+        <div class="summary-box">
+            <h3>Analysis Summary</h3>
+            <p id="summaryText">Waiting for images...</p>
+        </div>
+    `;
+
+    console.log('🔄 Classifier reset');
 }
 
 // ==================== MODELS CAROUSEL ====================
@@ -171,7 +489,7 @@ const modelsData = [
     }
 ];
 
-let currentModelIndex = 1; // Start with Egg Classifier
+let currentModelIndex = 1;
 
 class ModelsCarousel {
     constructor() {
@@ -193,56 +511,36 @@ class ModelsCarousel {
         }
 
         console.log('✅ Carousel initialized');
-        console.log('   Side models found:', this.sideModels.length);
-        console.log('   Dots found:', this.dots.length);
-
         this.attachEventListeners();
         this.updateDisplay(currentModelIndex);
     }
 
     attachEventListeners() {
-        // Dot navigation
         this.dots.forEach((dot, index) => {
             dot.addEventListener('click', () => {
-                console.log('📍 Dot clicked:', index);
                 this.switchModel(index);
             });
         });
 
-        // Side model items click
         this.sideModels.forEach((item) => {
             item.addEventListener('click', () => {
                 const dataIndex = parseInt(item.getAttribute('data-index'));
-                console.log('👆 Side model clicked, index:', dataIndex);
                 this.switchModel(dataIndex);
             });
         });
 
-        // Keyboard navigation
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowLeft') {
-                console.log('⬅️ Arrow left pressed');
-                this.switchModel(currentModelIndex - 1);
-            }
-            if (e.key === 'ArrowRight') {
-                console.log('➡️ Arrow right pressed');
-                this.switchModel(currentModelIndex + 1);
-            }
+            if (e.key === 'ArrowLeft') this.switchModel(currentModelIndex - 1);
+            if (e.key === 'ArrowRight') this.switchModel(currentModelIndex + 1);
         });
     }
 
     switchModel(newIndex) {
-        // Wrap around
         if (newIndex < 0) newIndex = modelsData.length - 1;
         if (newIndex >= modelsData.length) newIndex = 0;
 
-        if (newIndex === currentModelIndex) {
-            return;
-        }
+        if (newIndex === currentModelIndex) return;
 
-        console.log('🔄 Switching from', modelsData[currentModelIndex].title, 'to', modelsData[newIndex].title);
-
-        // Add transition out
         if (this.focusedCard) {
             this.focusedCard.classList.add('transition-out');
         }
@@ -265,26 +563,20 @@ class ModelsCarousel {
     updateDisplay(index) {
         const model = modelsData[index];
 
-        console.log('📝 Updating display for:', model.title);
-
-        // Update center card
         if (this.centerEmoji) this.centerEmoji.textContent = model.emoji;
         if (this.centerTitle) this.centerTitle.textContent = model.title;
         if (this.centerDescription) this.centerDescription.textContent = model.description;
 
-        // Update images
         if (this.modelImages) {
             this.modelImages.innerHTML = model.images
                 .map(img => `<img src="${img}" alt="${model.title} visualization" class="model-img">`)
                 .join('');
         }
 
-        // Update dots
         this.dots.forEach((dot, i) => {
             dot.classList.toggle('active', i === index);
         });
 
-        // Update side models highlight
         this.sideModels.forEach((item) => {
             const itemIndex = parseInt(item.getAttribute('data-index'));
             item.classList.toggle('active', itemIndex === index);
@@ -292,7 +584,6 @@ class ModelsCarousel {
     }
 }
 
-// Initialize carousel when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     console.log('📦 DOM Content Loaded, initializing carousel...');
     new ModelsCarousel();
