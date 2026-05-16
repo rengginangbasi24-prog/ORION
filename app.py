@@ -48,17 +48,44 @@ class IronWaterClassifier:
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model file not found: {model_path}")
             
-            # Try loading with keras 3.x format first, then fallback
+            file_size = os.path.getsize(model_path)
+            print(f"   File size: {file_size:,} bytes")
+            
+            # Try multiple loading strategies
+            loaded = False
+            
+            # Strategy 1: Standard load
             try:
                 self.model = keras.models.load_model(model_path, compile=False)
-                print(f"✅ Model loaded successfully: {object_type}")
-            except Exception as e:
-                print(f"   First attempt failed: {e}")
-                print(f"   Trying alternative load method...")
-                # Fallback: try with safe_mode
-                self.model = keras.models.load_model(model_path, custom_objects=None, safe_mode=False)
-                print(f"✅ Model loaded (alternative method): {object_type}")
+                print(f"✅ Model loaded successfully (standard): {object_type}")
+                loaded = True
+            except Exception as e1:
+                print(f"   Strategy 1 failed: {type(e1).__name__}")
                 
+                # Strategy 2: Load with custom_objects
+                try:
+                    self.model = keras.models.load_model(
+                        model_path, 
+                        custom_objects=None,
+                        safe_mode=False
+                    )
+                    print(f"✅ Model loaded successfully (custom_objects): {object_type}")
+                    loaded = True
+                except Exception as e2:
+                    print(f"   Strategy 2 failed: {type(e2).__name__}")
+                    
+                    # Strategy 3: Try with skip_mismatch
+                    try:
+                        self.model = keras.models.load_model(
+                            model_path,
+                            skip_mismatch=True
+                        )
+                        print(f"✅ Model loaded successfully (skip_mismatch): {object_type}")
+                        loaded = True
+                    except Exception as e3:
+                        print(f"   Strategy 3 failed: {type(e3).__name__}")
+                        raise e1
+                        
         except Exception as e:
             print(f"❌ FAILED to load {object_type}: {type(e).__name__}: {e}")
             import traceback
@@ -153,6 +180,7 @@ def load_models():
         print(f"✅ Successfully loaded models: {list(classifiers.keys())}")
     else:
         print(f"❌ NO MODELS LOADED! Check paths and file integrity.")
+        print(f"⚠️ If model files are corrupted, you may need to re-upload them.")
     print("="*60 + "\n")
 
 # ==================== ROUTES ====================
