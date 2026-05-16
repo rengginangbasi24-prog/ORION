@@ -11,10 +11,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy all application files
 COPY . .
+
+# Verify models are present (helps with debugging deployment issues)
+RUN echo "Checking for models..." && \
+    if [ -d models ]; then \
+        ls -lh models/ || echo "⚠️ models/ directory exists but is empty"; \
+    else \
+        echo "⚠️ WARNING: models/ directory not found!"; \
+    fi && \
+    echo "✅ Build complete"
 
 EXPOSE 5000
 
