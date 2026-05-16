@@ -297,6 +297,9 @@ function displayBatchResults(data) {
         conclusion = '⚠️ Significant contamination detected. Further investigation recommended.';
     }
 
+    // Generate solutions based on contamination level
+    const solutions = generateSolutions(cleanPercent);
+
     resultCard.innerHTML = `
         <div class="batch-results">
             <div class="batch-summary">
@@ -308,7 +311,7 @@ function displayBatchResults(data) {
                         <span class="stat-value">${summary.totalSamples}</span>
                     </div>
                     <div class="stat-box">
-                        <span class="stat-label">��� Clean</span>
+                        <span class="stat-label">✅ Clean</span>
                         <span class="stat-value clean">${summary.cleanCount} (${cleanPercent}%)</span>
                     </div>
                     <div class="stat-box">
@@ -326,6 +329,30 @@ function displayBatchResults(data) {
                     <p>${conclusion}</p>
                     <div class="model-info">
                         <strong>Model Used:</strong> ${summary.modelType.charAt(0).toUpperCase() + summary.modelType.slice(1)}
+                    </div>
+                </div>
+
+                <div class="solutions-box">
+                    <h3>💡 Recommended Solutions</h3>
+                    <div class="solution-section">
+                        <p><strong>Risk Level:</strong> ${solutions.riskLevel}</p>
+                        <p><strong>Status:</strong> ${solutions.status}</p>
+                    </div>
+                    <div class="solution-section">
+                        <h4>🚨 Immediate Actions:</h4>
+                        <ul class="action-list">
+                            ${solutions.immediateActions.map(action => `<li>• ${action}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div class="solution-section">
+                        <h4>🔧 Recommended Treatment:</h4>
+                        <ul class="action-list">
+                            ${solutions.treatments.map(treatment => `<li>• ${treatment}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div class="solution-section">
+                        <h4>📅 Testing Schedule:</h4>
+                        <p>${solutions.testingSchedule}</p>
                     </div>
                 </div>
             </div>
@@ -364,11 +391,77 @@ function displayBatchResults(data) {
     console.log('✅ Batch results displayed');
 }
 
+// ==================== GENERATE SOLUTIONS ====================
+
+function generateSolutions(cleanPercent) {
+    const cleanPercentNum = parseFloat(cleanPercent);
+
+    if (cleanPercentNum >= 80) {
+        return {
+            riskLevel: '🟢 LOW RISK',
+            status: 'Water quality is safe',
+            immediateActions: [
+                'Continue current water usage',
+                'Maintain existing filtration system',
+                'Monitor water quality regularly'
+            ],
+            treatments: [
+                'No immediate treatment needed',
+                'Standard maintenance filters sufficient',
+                'Continue regular preventive maintenance'
+            ],
+            testingSchedule: 'Test every 2 weeks for consistency'
+        };
+    } else if (cleanPercentNum >= 50) {
+        return {
+            riskLevel: '🟡 MEDIUM RISK',
+            status: 'Water quality needs monitoring',
+            immediateActions: [
+                'Increase water testing frequency',
+                'Reduce water consumption temporarily',
+                'Investigate contamination source',
+                'Consider water storage alternatives'
+            ],
+            treatments: [
+                'Install intermediate sediment filter',
+                'Upgrade current filtration system',
+                'Consider carbon-based treatment',
+                'Consult water treatment specialist'
+            ],
+            testingSchedule: 'Test weekly to monitor contamination levels'
+        };
+    } else {
+        return {
+            riskLevel: '🔴 HIGH RISK',
+            status: 'Urgent water treatment required',
+            immediateActions: [
+                '⚠️ STOP using this water immediately',
+                'Find alternative water source',
+                'Notify health authorities',
+                'Conduct professional water testing',
+                'Emergency treatment installation'
+            ],
+            treatments: [
+                'Install RO (Reverse Osmosis) system',
+                'Use advanced active carbon filtration',
+                'Chemical treatment may be required',
+                'Professional system installation urgent',
+                'Consider bottled water temporarily'
+            ],
+            testingSchedule: 'Test daily until treatment is implemented'
+        };
+    }
+}
+
 // ==================== DOWNLOAD REPORT ====================
 
 function downloadReport(data) {
     const { results, summary } = data;
     const timestamp = new Date().toLocaleString();
+    const cleanPercent = summary.totalSamples > 0 
+        ? ((summary.cleanCount / summary.totalSamples) * 100).toFixed(1) 
+        : 0;
+    const solutions = generateSolutions(cleanPercent);
 
     let reportText = `
 ORION - BATCH CLASSIFICATION REPORT
@@ -383,6 +476,19 @@ SUMMARY STATISTICS
 Clean Samples: ${summary.cleanCount}
 Contaminated Samples: ${summary.contaminatedCount}
 Average Confidence: ${summary.avgConfidence}%
+
+RECOMMENDED SOLUTIONS
+=====================
+Risk Level: ${solutions.riskLevel}
+Status: ${solutions.status}
+
+Immediate Actions:
+${solutions.immediateActions.map(action => `- ${action}`).join('\n')}
+
+Recommended Treatment:
+${solutions.treatments.map(treatment => `- ${treatment}`).join('\n')}
+
+Testing Schedule: ${solutions.testingSchedule}
 
 DETAILED RESULTS
 ================
